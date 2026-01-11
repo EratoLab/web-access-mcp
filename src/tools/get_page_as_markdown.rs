@@ -66,17 +66,126 @@ impl Tool for GetPageAsMarkdownTool {
     ) -> Result<ToolResult> {
         // Normalize and navigate to the URL
         let normalized_url = normalize_url(&params.url);
-        context.session.navigate(&normalized_url)?;
+
+        // Try to navigate - catch navigation errors gracefully
+        if let Err(e) = context.session.navigate(&normalized_url) {
+            // Check if this is a 404 or DNS error
+            let error_msg = e.to_string();
+            let is_404_or_dns_error = error_msg.contains("404")
+                || error_msg.contains("Not Found")
+                || error_msg.contains("net::ERR_NAME_NOT_RESOLVED")
+                || error_msg.contains("net::ERR_CONNECTION_REFUSED")
+                || error_msg.contains("net::ERR_INTERNET_DISCONNECTED")
+                || error_msg.contains("net::ERR_NAME_RESOLUTION_FAILED")
+                || error_msg.contains("DNS");
+
+            // For 404 or DNS errors, return a graceful error response instead of bubbling up
+            if is_404_or_dns_error {
+                return Ok(ToolResult::success_with(serde_json::json!({
+                    "error": "PAGE_NOT_FOUND",
+                    "message": format!("Unable to access the page: {}", error_msg),
+                    "url": normalized_url,
+                    "markdown": "",
+                    "title": "",
+                    "statusCode": if error_msg.contains("404") || error_msg.contains("Not Found") { 404 } else { 0 }
+                })));
+            }
+
+            // For other errors, bubble them up as before
+            return Err(e);
+        }
 
         // Wait for navigation if requested
         if params.wait_for_load {
-            context.session.wait_for_navigation()?;
+            if let Err(e) = context.session.wait_for_navigation() {
+                let error_msg = e.to_string();
+                let is_404_or_dns_error = error_msg.contains("404")
+                    || error_msg.contains("Not Found")
+                    || error_msg.contains("net::ERR_NAME_NOT_RESOLVED")
+                    || error_msg.contains("net::ERR_CONNECTION_REFUSED")
+                    || error_msg.contains("net::ERR_INTERNET_DISCONNECTED")
+                    || error_msg.contains("net::ERR_NAME_RESOLUTION_FAILED")
+                    || error_msg.contains("DNS");
+
+                if is_404_or_dns_error {
+                    return Ok(ToolResult::success_with(serde_json::json!({
+                        "error": "PAGE_NOT_FOUND",
+                        "message": format!("Unable to access the page: {}", error_msg),
+                        "url": normalized_url,
+                        "markdown": "",
+                        "title": "",
+                        "statusCode": if error_msg.contains("404") || error_msg.contains("Not Found") { 404 } else { 0 }
+                    })));
+                }
+
+                return Err(e);
+            }
         }
 
         // Wait for network idle with a timeout
         // Since headless_chrome doesn't have a direct network idle wait,
         // we add a small delay to let dynamic content load
         std::thread::sleep(std::time::Duration::from_millis(1000));
+
+        // Check if we landed on an error page by examining the title and URL
+        // Chrome shows error pages with specific patterns
+        let tab = context.session.tab()?;
+        let page_check = tab.evaluate(
+            r#"(function() {
+                const title = document.title || '';
+                const url = window.location.href || '';
+                const bodyText = document.body ? document.body.innerText : '';
+
+                // Check for Chrome error pages
+                const isChromeError = title.includes('ERR_') ||
+                                     url.includes('chrome-error://') ||
+                                     bodyText.includes('ERR_NAME_NOT_RESOLVED') ||
+                                     bodyText.includes('ERR_CONNECTION_REFUSED') ||
+                                     bodyText.includes('ERR_INTERNET_DISCONNECTED') ||
+                                     bodyText.includes('ERR_NAME_RESOLUTION_FAILED');
+
+                // Check for 404 pages (common patterns)
+                const is404 = title.toLowerCase().includes('404') ||
+                             title.toLowerCase().includes('not found') ||
+                             bodyText.toLowerCase().includes('404') ||
+                             bodyText.toLowerCase().includes('page not found');
+
+                return {
+                    isChromeError: isChromeError,
+                    is404: is404,
+                    title: title,
+                    url: url
+                };
+            })()"#,
+            false
+        );
+
+        if let Ok(check_result) = page_check {
+            if let Some(check_value) = check_result.value {
+                if let Ok(check_data) = serde_json::from_value::<serde_json::Value>(check_value.clone()) {
+                    let is_chrome_error = check_data.get("isChromeError").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let is_404 = check_data.get("is404").and_then(|v| v.as_bool()).unwrap_or(false);
+
+                    if is_chrome_error || is_404 {
+                        let error_title = check_data.get("title").and_then(|v| v.as_str()).unwrap_or("");
+                        let error_url = check_data.get("url").and_then(|v| v.as_str()).unwrap_or("");
+
+                        return Ok(ToolResult::success_with(serde_json::json!({
+                            "error": "PAGE_NOT_FOUND",
+                            "message": if is_404 {
+                                "The page returned a 404 Not Found error"
+                            } else {
+                                "Unable to access the page (DNS or connection error)"
+                            },
+                            "url": normalized_url,
+                            "markdown": "",
+                            "title": error_title,
+                            "statusCode": if is_404 { 404 } else { 0 }
+                        })));
+                    }
+                }
+            }
+        }
 
         // Inject Readability.js script and the conversion script
         // Use 'var' instead of 'const' to allow redeclaration on subsequent calls
