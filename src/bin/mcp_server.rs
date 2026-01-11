@@ -62,6 +62,10 @@ struct Cli {
     #[arg(long, short = 'p', default_value = "3000")]
     port: u16,
 
+    /// Host address to bind to (default: 127.0.0.1)
+    #[arg(long, default_value = "127.0.0.1")]
+    host: String,
+
     /// SSE endpoint path (default: /sse)
     #[arg(long, default_value = "/sse")]
     sse_path: String,
@@ -173,11 +177,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Transport::Sse => {
             info!("Transport: SSE");
+            info!("Host: {}", cli.host);
             info!("Port: {}", cli.port);
             info!("SSE path: {}", cli.sse_path);
             info!("SSE POST path: {}", cli.sse_post_path);
 
-            let bind_addr = format!("127.0.0.1:{}", cli.port);
+            let bind_addr = format!("{}:{}", cli.host, cli.port);
 
             // Create SSE server configuration
             let config = SseServerConfig {
@@ -208,10 +213,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Transport::Http => {
             info!("Transport: HTTP streamable");
+            info!("Host: {}", cli.host);
             info!("Port: {}", cli.port);
             info!("HTTP path: {}", cli.http_path);
 
-            let bind_addr = format!("127.0.0.1:{}", cli.port);
+            let bind_addr = format!("{}:{}", cli.host, cli.port);
 
             // Create service factory closure
             let service_factory = move || {
