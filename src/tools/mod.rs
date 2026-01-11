@@ -8,6 +8,7 @@ pub mod close;
 pub mod close_tab;
 pub mod evaluate;
 pub mod extract;
+pub mod get_page_as_markdown;
 pub mod go_back;
 pub mod go_forward;
 pub mod hover;
@@ -34,6 +35,7 @@ pub use close::CloseParams;
 pub use close_tab::CloseTabParams;
 pub use evaluate::EvaluateParams;
 pub use extract::ExtractParams;
+pub use get_page_as_markdown::GetPageAsMarkdownParams;
 pub use go_back::GoBackParams;
 pub use go_forward::GoForwardParams;
 pub use hover::HoverParams;
@@ -214,36 +216,8 @@ impl ToolRegistry {
     pub fn with_defaults() -> Self {
         let mut registry = Self::new();
 
-        // Register navigation tools
-        registry.register(navigate::NavigateTool);
-        registry.register(go_back::GoBackTool);
-        registry.register(go_forward::GoForwardTool);
-        registry.register(wait::WaitTool);
-
-        // Register interaction tools
-        registry.register(click::ClickTool);
-        registry.register(input::InputTool);
-        registry.register(select::SelectTool);
-        registry.register(hover::HoverTool);
-        registry.register(press_key::PressKeyTool);
-        registry.register(scroll::ScrollTool);
-
-        // Register tab management tools
-        registry.register(new_tab::NewTabTool);
-        registry.register(tab_list::TabListTool);
-        registry.register(switch_tab::SwitchTabTool);
-        registry.register(close_tab::CloseTabTool);
-
-        // Register reading and extraction tools
-        registry.register(extract::ExtractContentTool);
-        registry.register(markdown::GetMarkdownTool);
-        registry.register(read_links::ReadLinksTool);
-        registry.register(snapshot::SnapshotTool);
-
-        // Register utility tools
-        registry.register(screenshot::ScreenshotTool);
-        registry.register(evaluate::EvaluateTool);
-        registry.register(close::CloseTool);
+        // Register only the combined get_page_as_markdown tool
+        registry.register(get_page_as_markdown::GetPageAsMarkdownTool);
 
         registry
     }
