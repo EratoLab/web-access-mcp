@@ -157,18 +157,30 @@ impl Tool for GetPageAsMarkdownTool {
                     url: url
                 };
             })()"#,
-            false
+            false,
         );
 
         if let Ok(check_result) = page_check {
             if let Some(check_value) = check_result.value {
-                if let Ok(check_data) = serde_json::from_value::<serde_json::Value>(check_value.clone()) {
-                    let is_chrome_error = check_data.get("isChromeError").and_then(|v| v.as_bool()).unwrap_or(false);
-                    let is_404 = check_data.get("is404").and_then(|v| v.as_bool()).unwrap_or(false);
+                if let Ok(check_data) =
+                    serde_json::from_value::<serde_json::Value>(check_value.clone())
+                {
+                    let is_chrome_error = check_data
+                        .get("isChromeError")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    let is_404 = check_data
+                        .get("is404")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
 
                     if is_chrome_error || is_404 {
-                        let error_title = check_data.get("title").and_then(|v| v.as_str()).unwrap_or("");
-                        let error_url = check_data.get("url").and_then(|v| v.as_str()).unwrap_or("");
+                        let error_title = check_data
+                            .get("title")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        let error_url =
+                            check_data.get("url").and_then(|v| v.as_str()).unwrap_or("");
 
                         return Ok(ToolResult::success_with(serde_json::json!({
                             "error": "PAGE_NOT_FOUND",

@@ -13,9 +13,14 @@ use std::io::{stdin, stdout};
 #[cfg(feature = "mcp-server")]
 use rmcp::transport::{
     sse_server::{SseServer, SseServerConfig},
-    streamable_http_server::{StreamableHttpService, session::local::LocalSessionManager},
+    streamable_http_server::{
+        StreamableHttpService,
+        session::local::{LocalSessionManager, SessionConfig},
+    },
 };
 
+#[cfg(feature = "mcp-server")]
+use std::time::Duration;
 #[cfg(feature = "mcp-server")]
 use tokio_util::sync::CancellationToken;
 
@@ -77,6 +82,10 @@ struct Cli {
     /// HTTP streamable endpoint path (default: /mcp)
     #[arg(long, default_value = "/mcp")]
     http_path: String,
+
+    /// Session inactivity timeout in seconds for HTTP streamable transport (default: 1800). Set to 0 to disable automatic cleanup.
+    #[arg(long, default_value = "1800")]
+    session_inactivity_timeout_secs: u64,
 
     /// Log file path for stdio mode (default: browser-use-mcp.log)
     #[arg(long, default_value = "browser-use-mcp.log")]
@@ -216,6 +225,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             info!("Host: {}", cli.host);
             info!("Port: {}", cli.port);
             info!("HTTP path: {}", cli.http_path);
+            info!(
+                "Session inactivity timeout: {}",
+                if cli.session_inactivity_timeout_secs == 0 {
+                    "disabled".to_string()
+                } else {
+                    format!("{}s", cli.session_inactivity_timeout_secs)
+                }
+            );
 
             let bind_addr = format!("{}:{}", cli.host, cli.port);
 
@@ -225,9 +242,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
             };
 
+            let mut session_manager = LocalSessionManager::default();
+            session_manager.session_config = SessionConfig {
+                keep_alive: if cli.session_inactivity_timeout_secs == 0 {
+                    None
+                } else {
+                    Some(Duration::from_secs(cli.session_inactivity_timeout_secs))
+                },
+                ..SessionConfig::default()
+            };
+
             let http_service = StreamableHttpService::new(
                 service_factory,
-                LocalSessionManager::default().into(),
+                session_manager.into(),
                 Default::default(),
             );
 
