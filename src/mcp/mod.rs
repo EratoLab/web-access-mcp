@@ -39,11 +39,14 @@ macro_rules! register_mcp_tools {
                     &self,
                     params: Parameters<<$tool_type as Tool>::Params>,
                 ) -> Result<CallToolResult, McpError> {
-                    let session = self.session();
-                    let mut context = ToolContext::new(&*session);
-                    let tool = <$tool_type>::default();
-                    let result = tool.execute_typed(params.0, &mut context)
-                        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+                    let result = self
+                        .with_session(|session| {
+                            let mut context = ToolContext::new(session);
+                            let tool = <$tool_type>::default();
+                            tool.execute_typed(params.0, &mut context)
+                                .map_err(|e| e.to_string())
+                        })
+                        .map_err(|e| McpError::internal_error(e, None))?;
                     convert_result(result)
                 }
             )*
