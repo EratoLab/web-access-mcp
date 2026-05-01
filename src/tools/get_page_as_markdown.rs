@@ -179,9 +179,6 @@ impl Tool for GetPageAsMarkdownTool {
                             .get("title")
                             .and_then(|v| v.as_str())
                             .unwrap_or("");
-                        let error_url =
-                            check_data.get("url").and_then(|v| v.as_str()).unwrap_or("");
-
                         return Ok(ToolResult::success_with(serde_json::json!({
                             "error": "PAGE_NOT_FOUND",
                             "message": if is_404 {

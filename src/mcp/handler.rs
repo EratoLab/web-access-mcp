@@ -18,6 +18,7 @@ use std::sync::{Arc, Mutex};
 pub struct BrowserServer {
     session: Arc<Mutex<Option<BrowserSession>>>,
     launch_options: crate::browser::LaunchOptions,
+    #[allow(dead_code)]
     tool_router: ToolRouter<Self>,
 }
 
@@ -75,10 +76,9 @@ impl Drop for BrowserServer {
 #[tool_handler]
 impl ServerHandler for BrowserServer {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo {
-            instructions: Some("Browser-use MCP Server".into()),
-            capabilities: ServerCapabilities::builder().enable_tools().build(),
-            ..Default::default()
-        }
+        let mut info = ServerInfo::default();
+        info.instructions = Some("Browser-use MCP Server".into());
+        info.capabilities = ServerCapabilities::builder().enable_tools().build();
+        info
     }
 }
