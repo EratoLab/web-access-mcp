@@ -12,24 +12,19 @@ use std::io::{stdin, stdout};
 
 #[cfg(feature = "mcp-server")]
 use rmcp::transport::{
-    sse_server::{SseServer, SseServerConfig},
     streamable_http_server::{
-        StreamableHttpService,
+        StreamableHttpServerConfig, StreamableHttpService,
         session::local::{LocalSessionManager, SessionConfig},
     },
 };
 
 #[cfg(feature = "mcp-server")]
 use std::time::Duration;
-#[cfg(feature = "mcp-server")]
-use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum Transport {
     /// Standard input/output transport (default)
     Stdio,
-    /// Server-Sent Events transport
-    Sse,
     /// HTTP streamable transport
     Http,
 }
@@ -63,7 +58,7 @@ struct Cli {
     #[arg(long, short = 't', value_enum, default_value = "stdio")]
     transport: Transport,
 
-    /// Port for SSE or HTTP transport (default: 3000)
+    /// Port for HTTP transport (default: 3000)
     #[arg(long, short = 'p', default_value = "3000")]
     port: u16,
 
@@ -71,17 +66,17 @@ struct Cli {
     #[arg(long, default_value = "127.0.0.1")]
     host: String,
 
-    /// SSE endpoint path (default: /sse)
-    #[arg(long, default_value = "/sse")]
-    sse_path: String,
-
-    /// SSE POST path for messages (default: /message)
-    #[arg(long, default_value = "/message")]
-    sse_post_path: String,
-
     /// HTTP streamable endpoint path (default: /mcp)
     #[arg(long, default_value = "/mcp")]
     http_path: String,
+
+    /// Allowed Host header for HTTP transport. Repeat to allow multiple hosts.
+    #[arg(long = "allowed-host", value_name = "HOST")]
+    allowed_hosts: Vec<String>,
+
+    /// Skip Host header verification for HTTP transport.
+    #[arg(long)]
+    skip_host_header_verification: bool,
 
     /// Session inactivity timeout in seconds for HTTP streamable transport (default: 1800). Set to 0 to disable automatic cleanup.
     #[arg(long, default_value = "1800")]
@@ -184,47 +179,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 debug!("Server quit with reason: {:?}", quit_reason);
             }
         }
-        Transport::Sse => {
-            info!("Transport: SSE");
-            info!("Host: {}", cli.host);
-            info!("Port: {}", cli.port);
-            info!("SSE path: {}", cli.sse_path);
-            info!("SSE POST path: {}", cli.sse_post_path);
-
-            let bind_addr = format!("{}:{}", cli.host, cli.port);
-
-            // Create SSE server configuration
-            let config = SseServerConfig {
-                bind: bind_addr.parse()?,
-                sse_path: cli.sse_path.clone(),
-                post_path: cli.sse_post_path.clone(),
-                ct: CancellationToken::new(),
-                sse_keep_alive: None,
-            };
-
-            // Create SSE server and router
-            let (sse_server, router) = SseServer::new(config);
-
-            info!(
-                "Ready to accept MCP connections at http://{}{}",
-                bind_addr, cli.sse_path
-            );
-
-            // Register service factory for each connection
-            let _cancellation_token = sse_server.with_service(move || {
-                BrowserServer::with_options(options.clone())
-                    .expect("Failed to create browser server")
-            });
-
-            // Start HTTP server with SSE router
-            let listener = tokio::net::TcpListener::bind(&bind_addr).await?;
-            axum::serve(listener, router.into_make_service()).await?;
-        }
         Transport::Http => {
             info!("Transport: HTTP streamable");
             info!("Host: {}", cli.host);
             info!("Port: {}", cli.port);
             info!("HTTP path: {}", cli.http_path);
+            info!(
+                "Host header verification: {}",
+                if cli.skip_host_header_verification {
+                    "disabled".to_string()
+                } else if cli.allowed_hosts.is_empty() {
+                    "default".to_string()
+                } else {
+                    format!("allowed hosts: {}", cli.allowed_hosts.join(", "))
+                }
+            );
             info!(
                 "Session inactivity timeout: {}",
                 if cli.session_inactivity_timeout_secs == 0 {
@@ -243,19 +212,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
 
             let mut session_manager = LocalSessionManager::default();
-            session_manager.session_config = SessionConfig {
-                keep_alive: if cli.session_inactivity_timeout_secs == 0 {
-                    None
-                } else {
-                    Some(Duration::from_secs(cli.session_inactivity_timeout_secs))
-                },
-                ..SessionConfig::default()
+            let mut session_config = SessionConfig::default();
+            session_config.keep_alive = if cli.session_inactivity_timeout_secs == 0 {
+                None
+            } else {
+                Some(Duration::from_secs(cli.session_inactivity_timeout_secs))
+            };
+            session_manager.session_config = session_config;
+
+            let http_config = if cli.skip_host_header_verification {
+                StreamableHttpServerConfig::default().disable_allowed_hosts()
+            } else if cli.allowed_hosts.is_empty() {
+                StreamableHttpServerConfig::default()
+            } else {
+                StreamableHttpServerConfig::default().with_allowed_hosts(cli.allowed_hosts)
             };
 
             let http_service = StreamableHttpService::new(
                 service_factory,
                 session_manager.into(),
-                Default::default(),
+                http_config,
             );
 
             let router = axum::Router::new().nest_service(&cli.http_path, http_service);
