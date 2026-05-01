@@ -11,11 +11,9 @@ use rmcp::{ServiceExt, transport::stdio};
 use std::io::{stdin, stdout};
 
 #[cfg(feature = "mcp-server")]
-use rmcp::transport::{
-    streamable_http_server::{
-        StreamableHttpServerConfig, StreamableHttpService,
-        session::local::{LocalSessionManager, SessionConfig},
-    },
+use rmcp::transport::streamable_http_server::{
+    StreamableHttpServerConfig, StreamableHttpService,
+    session::local::{LocalSessionManager, SessionConfig},
 };
 
 #[cfg(feature = "mcp-server")]
@@ -95,6 +93,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Configure browser launch options
     let options = LaunchOptions {
         headless: !cli.headed,
+        chrome_path: cli.executable_path.clone().map(Into::into),
+        user_data_dir: cli.user_data_dir.clone().map(Into::into),
         ..Default::default()
     };
 

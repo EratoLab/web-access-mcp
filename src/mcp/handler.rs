@@ -8,7 +8,12 @@ use rmcp::{
     model::{ServerCapabilities, ServerInfo},
     tool_handler,
 };
-use std::sync::{Arc, Mutex};
+use std::sync::{Mutex, OnceLock};
+
+fn browser_session_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
 
 /// MCP Server wrapper for BrowserSession
 ///
@@ -16,7 +21,6 @@ use std::sync::{Arc, Mutex};
 /// for MCP tool execution.
 #[derive(Clone)]
 pub struct BrowserServer {
-    session: Arc<Mutex<Option<BrowserSession>>>,
     launch_options: crate::browser::LaunchOptions,
     #[allow(dead_code)]
     tool_router: ToolRouter<Self>,
@@ -31,7 +35,6 @@ impl BrowserServer {
     /// Create a new browser server with custom launch options
     pub fn with_options(options: crate::browser::LaunchOptions) -> Result<Self, String> {
         Ok(Self {
-            session: Arc::new(Mutex::new(None)),
             launch_options: options,
             tool_router: Self::tool_router(),
         })
@@ -42,22 +45,17 @@ impl BrowserServer {
     where
         F: FnOnce(&BrowserSession) -> Result<R, String>,
     {
-        let mut session_guard = self
-            .session
+        let _launch_guard = browser_session_lock()
             .lock()
-            .map_err(|_| "Failed to lock browser session".to_string())?;
+            .map_err(|_| "Failed to lock browser session launcher".to_string())?;
 
-        if session_guard.is_none() {
-            let session = BrowserSession::launch(self.launch_options.clone())
-                .map_err(|e| format!("Failed to launch browser: {}", e))?;
-            *session_guard = Some(session);
+        let session = BrowserSession::launch(self.launch_options.clone())
+            .map_err(|e| format!("Failed to launch browser: {}", e))?;
+        let result = f(&session);
+        if let Err(e) = session.close() {
+            debug!("Failed to close browser session cleanly: {}", e);
         }
-
-        let session = session_guard
-            .as_ref()
-            .ok_or_else(|| "Browser session is not initialized".to_string())?;
-
-        f(session)
+        result
     }
 }
 

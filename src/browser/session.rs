@@ -20,11 +20,23 @@ pub struct BrowserSession {
 
     /// Tool registry for executing browser automation tools
     tool_registry: ToolRegistry,
+
+    /// Temporary Chrome profile directory owned by this session.
+    _profile_dir: Option<tempfile::TempDir>,
 }
 
 impl BrowserSession {
     /// Launch a new browser instance with the given options
     pub fn launch(options: LaunchOptions) -> Result<Self> {
+        let (chrome_user_data_dir, profile_dir) = if let Some(dir) = options.user_data_dir {
+            (Some(dir), None)
+        } else {
+            let dir = tempfile::Builder::new()
+                .prefix("web-access-mcp-chrome-")
+                .tempdir()?;
+            (Some(dir.path().to_path_buf()), Some(dir))
+        };
+
         let mut launch_opts = headless_chrome::LaunchOptions::default();
 
         // Ignore default arguments to prevent detection by anti-bot services
@@ -49,10 +61,7 @@ impl BrowserSession {
             launch_opts.path = Some(path);
         }
 
-        // Set user data directory if provided
-        if let Some(dir) = options.user_data_dir {
-            launch_opts.user_data_dir = Some(dir);
-        }
+        launch_opts.user_data_dir = chrome_user_data_dir;
 
         // Set sandbox mode
         launch_opts.sandbox = options.sandbox;
@@ -68,6 +77,7 @@ impl BrowserSession {
         Ok(Self {
             browser,
             tool_registry: ToolRegistry::with_defaults(),
+            _profile_dir: profile_dir,
         })
     }
 
@@ -79,6 +89,7 @@ impl BrowserSession {
         Ok(Self {
             browser,
             tool_registry: ToolRegistry::with_defaults(),
+            _profile_dir: None,
         })
     }
 
