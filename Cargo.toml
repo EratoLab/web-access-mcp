@@ -57,3 +57,6 @@ tempfile = "3"
 
 [dev-dependencies]
 urlencoding = "2.1"
+
+[patch.crates-io]
+headless_chrome = { path = "vendor/headless_chrome" }

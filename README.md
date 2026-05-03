@@ -2,7 +2,7 @@
 
 `web-access-mcp` is a Rust-based Model Context Protocol server that gives MCP clients browser-backed access to web pages.
 
-The project currently focuses on one compact tool, `browser_get_page_as_markdown`, which navigates to a URL and returns the page content as Markdown. Internally it launches or connects to a Chrome/Chromium instance through the Chrome DevTools Protocol.
+The project currently focuses on one compact tool, `browser_get_page_as_markdown`, which navigates to a URL and returns the page content as Markdown. Internally it launches or connects to a CDP-compatible browser through the Chrome DevTools Protocol.
 
 This repository still uses the Rust crate/package name `browser-use`, but the intended product surface is the MCP server binary.
 
@@ -13,12 +13,13 @@ This repository still uses the Rust crate/package name `browser-use`, but the in
 - SSE transport is no longer supported. `rmcp` 1.5 removed the old SSE server transport.
 - Streamable HTTP enables Host header verification by default. Local loopback hosts are allowed by default; use `--allowed-host` for public or proxied deployments, or `--skip-host-header-verification` only when you intentionally want to disable that protection.
 - Browser automation is synchronous and backed by `headless_chrome`.
+- Local browser launch supports Chrome/Chromium and LightPanda.
 - The exposed MCP tool surface is intentionally small.
 
 ## Requirements
 
 - Rust toolchain
-- Chrome or Chromium installed, unless connecting to an existing browser through CDP/WebSocket
+- Chrome/Chromium or LightPanda installed, unless connecting to an existing browser through CDP/WebSocket
 
 ## Running the MCP server
 
@@ -28,6 +29,9 @@ cargo run --bin mcp-server
 
 # stdio transport, visible browser
 cargo run --bin mcp-server -- --headed
+
+# stdio transport, LightPanda
+cargo run --bin mcp-server -- --browser lightpanda
 
 # Streamable HTTP transport
 cargo run --bin mcp-server -- --transport http --host 127.0.0.1 --port 3000
@@ -49,7 +53,8 @@ This combines navigation and content extraction in one tool so MCP clients can r
 | Flag | Default | Description |
 | --- | --- | --- |
 | `--headed`, `-H` | `false` | Launch Chrome/Chromium in headed mode instead of headless mode. |
-| `--executable-path <PATH>` | unset | Path to a custom Chrome/Chromium executable. |
+| `--browser <chrome\|lightpanda>` | unset | Browser implementation to launch. When omitted, Chrome/Chromium is preferred and LightPanda is used as a fallback. If set explicitly, the requested browser must be installed. |
+| `--executable-path <PATH>` | unset | Path to a custom browser executable. |
 | `--cdp-endpoint <URL>` | unset | CDP endpoint URL for connecting to a remote browser. |
 | `--ws-endpoint <URL>` | unset | WebSocket endpoint URL for connecting to a remote browser. |
 | `--user-data-dir <DIR>` | unset | Persistent browser profile directory. |

@@ -3,7 +3,7 @@
 //! This binary provides a Model Context Protocol (MCP) server for browser automation.
 //! It exposes browser automation tools that can be used by AI assistants and other MCP clients.
 
-use browser_use::browser::LaunchOptions;
+use browser_use::browser::{BrowserEngine, BrowserSession, LaunchOptions};
 use browser_use::mcp::BrowserServer;
 use clap::{Parser, ValueEnum};
 use log::{debug, info};
@@ -27,6 +27,23 @@ enum Transport {
     Http,
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum BrowserChoice {
+    /// Launch Chrome/Chromium
+    Chrome,
+    /// Launch LightPanda
+    Lightpanda,
+}
+
+impl From<BrowserChoice> for BrowserEngine {
+    fn from(value: BrowserChoice) -> Self {
+        match value {
+            BrowserChoice::Chrome => BrowserEngine::Chrome,
+            BrowserChoice::Lightpanda => BrowserEngine::Lightpanda,
+        }
+    }
+}
+
 #[derive(Parser)]
 #[command(name = "browser-use")]
 #[command(version)]
@@ -39,6 +56,10 @@ struct Cli {
     /// Path to custom browser executable
     #[arg(long, value_name = "PATH")]
     executable_path: Option<String>,
+
+    /// Browser implementation to launch. Omit to prefer Chrome and fall back to LightPanda.
+    #[arg(long, value_enum)]
+    browser: Option<BrowserChoice>,
 
     /// CDP endpoint URL for remote browser connection
     #[arg(long, value_name = "URL")]
@@ -93,12 +114,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Configure browser launch options
     let options = LaunchOptions {
         headless: !cli.headed,
+        browser_engine: cli.browser.map(Into::into).unwrap_or(BrowserEngine::Auto),
         chrome_path: cli.executable_path.clone().map(Into::into),
         user_data_dir: cli.user_data_dir.clone().map(Into::into),
         ..Default::default()
     };
 
     info!("Browser-use MCP Server v{}", env!("CARGO_PKG_VERSION"));
+    info!(
+        "Browser engine: {}",
+        match options.browser_engine {
+            BrowserEngine::Auto => "auto",
+            BrowserEngine::Chrome => "chrome",
+            BrowserEngine::Lightpanda => "lightpanda",
+        }
+    );
+
     info!(
         "Browser mode: {}",
         if options.headless {
@@ -123,6 +154,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(ref dir) = cli.user_data_dir {
         info!("User data directory: {}", dir);
     }
+
+    BrowserSession::validate_browser_binary(&options)
+        .map_err(|e| format!("Browser binary validation failed: {e}"))?;
 
     // Route to appropriate transport
     match cli.transport {
@@ -228,11 +262,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 StreamableHttpServerConfig::default().with_allowed_hosts(cli.allowed_hosts)
             };
 
-            let http_service = StreamableHttpService::new(
-                service_factory,
-                session_manager.into(),
-                http_config,
-            );
+            let http_service =
+                StreamableHttpService::new(service_factory, session_manager.into(), http_config);
 
             let router = axum::Router::new().nest_service(&cli.http_path, http_service);
 

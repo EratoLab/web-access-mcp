@@ -1,12 +1,12 @@
 //! Browser management module
 //!
-//! This module provides functionality for launching and managing Chrome/Chromium browser instances.
+//! This module provides functionality for launching and managing CDP-compatible browser instances.
 //! It includes configuration options, session management, and browser lifecycle control.
 
 pub mod config;
 pub mod session;
 
-pub use config::{ConnectionOptions, LaunchOptions};
+pub use config::{BrowserEngine, ConnectionOptions, LaunchOptions};
 pub use session::BrowserSession;
 
 use crate::error::Result;
