@@ -11,6 +11,7 @@ RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS builder
 COPY --from=planner /app/recipe.json recipe.json
+COPY vendor/headless_chrome vendor/headless_chrome
 # Build dependencies - this is the caching Docker layer!
 RUN cargo chef cook --release --features mcp-server --recipe-path recipe.json
 # Build application
