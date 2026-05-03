@@ -12,6 +12,7 @@ on:
       - '.github/workflows/docker-build.yml'
       - 'src/**'
       - 'Dockerfile'
+      - 'Dockerfile.Lightpanda'
       - 'Cargo.toml'
       - 'Cargo.lock'
   pull_request:
@@ -20,6 +21,7 @@ on:
       - '.github/workflows/docker-build.yml'
       - 'src/**'
       - 'Dockerfile'
+      - 'Dockerfile.Lightpanda'
       - 'Cargo.toml'
       - 'Cargo.lock'
 
@@ -34,13 +36,18 @@ jobs:
     timeout-minutes: 10
     name: "lint dockerfile"
     runs-on: ubuntu-24.04 # blacksmith-4vcpu-ubuntu-2404
+    strategy:
+      matrix:
+        dockerfile:
+          - Dockerfile
+          - Dockerfile.Lightpanda
     steps:
       - uses: actions/checkout@v4
 
       - name: "Lint Dockerfile"
         uses: jbergstroem/hadolint-gh-action@v1.12.2
         with:
-          dockerfile: Dockerfile
+          dockerfile: ${{ matrix.dockerfile }}
 
 #  cargo-clippy:
 #    runs-on: ubuntu-24.04 # blacksmith-8vcpu-ubuntu-2404
@@ -79,6 +86,13 @@ jobs:
     needs: [lint-dockerfile, test]
     permissions:
       contents: read
+    strategy:
+      matrix:
+        include:
+          - variant: chrome
+            dockerfile: Dockerfile
+          - variant: lightpanda
+            dockerfile: Dockerfile.Lightpanda
 
     steps:
       - name: Checkout repository
@@ -98,19 +112,26 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./Dockerfile
+          file: ./${{ matrix.dockerfile }}
           push: true
           platforms: linux/amd64
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-amd64
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.SHA_TAG }}-amd64
-            ${{ env.RELEASE_VERSION != '' && format('{0}/{1}:{2}-amd64', env.REGISTRY, env.IMAGE_NAME, env.RELEASE_VERSION) || '' }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-amd64-${{ matrix.variant }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.SHA_TAG }}-amd64-${{ matrix.variant }}
+            ${{ env.RELEASE_VERSION != '' && format('{0}/{1}:{2}-amd64-{3}', env.REGISTRY, env.IMAGE_NAME, env.RELEASE_VERSION, matrix.variant) || '' }}
 
   build-and-push-arm64:
     runs-on: ubuntu-24.04-arm64-custom-large # blacksmith-8vcpu-ubuntu-2404-arm
     needs: [lint-dockerfile, test]
     permissions:
       contents: read
+    strategy:
+      matrix:
+        include:
+          - variant: chrome
+            dockerfile: Dockerfile
+          - variant: lightpanda
+            dockerfile: Dockerfile.Lightpanda
 
     steps:
       - name: Checkout repository
@@ -130,13 +151,13 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./Dockerfile
+          file: ./${{ matrix.dockerfile }}
           push: true
           platforms: linux/arm64
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-arm64
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.SHA_TAG }}-arm64
-            ${{ env.RELEASE_VERSION != '' && format('{0}/{1}:{2}-arm64', env.REGISTRY, env.IMAGE_NAME, env.RELEASE_VERSION) || '' }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-arm64-${{ matrix.variant }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.SHA_TAG }}-arm64-${{ matrix.variant }}
+            ${{ env.RELEASE_VERSION != '' && format('{0}/{1}:{2}-arm64-{3}', env.REGISTRY, env.IMAGE_NAME, env.RELEASE_VERSION, matrix.variant) || '' }}
 
   create-manifests:
     needs: [build-and-push-amd64, build-and-push-arm64]
@@ -154,21 +175,42 @@ jobs:
 
       - name: Create and push manifests
         run: |
-          # Create multi-arch manifest for latest
-          docker buildx imagetools create -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-amd64 \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-arm64
+          # Create multi-arch manifests for Chrome and keep unsuffixed aliases pointing to Chrome.
+          docker buildx imagetools create \
+            -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-chrome \
+            -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-amd64-chrome \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-arm64-chrome
 
-          # Create multi-arch manifest for SHA
-          docker buildx imagetools create -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.SHA_TAG }} \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.SHA_TAG }}-amd64 \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.SHA_TAG }}-arm64
+          docker buildx imagetools create \
+            -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.SHA_TAG }}-chrome \
+            -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.SHA_TAG }} \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.SHA_TAG }}-amd64-chrome \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.SHA_TAG }}-arm64-chrome
 
-          # Create multi-arch manifest for release version (if tagged)
+          # Create multi-arch manifests for LightPanda.
+          docker buildx imagetools create \
+            -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-lightpanda \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-amd64-lightpanda \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-arm64-lightpanda
+
+          docker buildx imagetools create \
+            -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.SHA_TAG }}-lightpanda \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.SHA_TAG }}-amd64-lightpanda \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.SHA_TAG }}-arm64-lightpanda
+
+          # Create multi-arch manifests for release version (if tagged).
           if [[ "${{ env.RELEASE_VERSION }}" != "" ]]; then
-            docker buildx imagetools create -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.RELEASE_VERSION }} \
-              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.RELEASE_VERSION }}-amd64 \
-              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.RELEASE_VERSION }}-arm64
+            docker buildx imagetools create \
+              -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.RELEASE_VERSION }}-chrome \
+              -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.RELEASE_VERSION }} \
+              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.RELEASE_VERSION }}-amd64-chrome \
+              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.RELEASE_VERSION }}-arm64-chrome
+
+            docker buildx imagetools create \
+              -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.RELEASE_VERSION }}-lightpanda \
+              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.RELEASE_VERSION }}-amd64-lightpanda \
+              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.RELEASE_VERSION }}-arm64-lightpanda
           fi
 
   create-github-release:
@@ -192,9 +234,11 @@ jobs:
 
           \`\`\`bash
           docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}-chrome
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}-lightpanda
           \`\`\`
 
-          Multi-architecture support: amd64, arm64
+          Multi-architecture support: amd64, arm64. Unsuffixed tags point to the Chrome image.
 
           ### Changes
 

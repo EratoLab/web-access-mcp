@@ -69,4 +69,4 @@ ENV CHROME_PATH=/usr/bin/chromium
 
 EXPOSE 3000
 
-CMD ["./mcp-server"]
+CMD ["./mcp-server", "--browser", "chrome", "--executable-path", "/usr/bin/chromium"]

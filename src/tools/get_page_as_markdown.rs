@@ -196,6 +196,15 @@ impl Tool for GetPageAsMarkdownTool {
             }
         }
 
+        if context.session.is_lightpanda() {
+            let markdown = context.session.get_lightpanda_markdown()?;
+            let title = get_page_string(context, "document.title")?;
+            let url = get_page_string(context, "window.location.href")?;
+            return Ok(markdown_tool_result(
+                &markdown, &title, &url, "", "", "", &params,
+            ));
+        }
+
         // Inject Readability.js script and the conversion script
         // Use 'var' instead of 'const' to allow redeclaration on subsequent calls
         // This prevents "identifier already declared" errors when calling get_markdown multiple times
@@ -206,111 +215,232 @@ impl Tool for GetPageAsMarkdownTool {
         );
 
         // Execute the JavaScript to extract and convert content
-        let result = context
-            .session
-            .tab()?
-            .evaluate(&js_code, false)
-            .map_err(|e| BrowserError::EvaluationFailed(e.to_string()))?;
-
-        // Parse the result
-        let result_value = result.value.ok_or_else(|| {
-            // Capture description if available
-            let description = result
-                .description
-                .map(|d| format!("Description: {}", d))
-                .unwrap_or_else(|| format!("Type: {:?}", result.Type));
-
-            BrowserError::ToolExecutionFailed {
-                tool: "get_page_as_markdown".to_string(),
-                reason: format!("No value returned from JavaScript. {}", description),
+        let mut extraction_result = match context.session.tab()?.evaluate(&js_code, false) {
+            Ok(result) => parse_extraction_result(result.value, result.description, result.Type)?,
+            Err(e) => {
+                log::debug!(
+                    "Readability extraction failed, falling back to full document HTML: {}",
+                    e
+                );
+                extract_full_document(context)?
             }
-        })?;
-
-        // The JavaScript returns a JSON string, so we need to parse it
-        let extraction_result: ExtractionResult = if let Some(json_str) = result_value.as_str() {
-            serde_json::from_str(json_str).map_err(|e| BrowserError::ToolExecutionFailed {
-                tool: "get_page_as_markdown".to_string(),
-                reason: format!("Failed to parse extraction result: {}", e),
-            })?
-        } else {
-            // If it's already an object, try to deserialize directly
-            serde_json::from_value(result_value).map_err(|e| BrowserError::ToolExecutionFailed {
-                tool: "get_page_as_markdown".to_string(),
-                reason: format!("Failed to deserialize extraction result: {}", e),
-            })?
         };
 
         // Check if Readability failed
         if extraction_result.readability_failed {
-            return Err(BrowserError::ToolExecutionFailed {
-                tool: "get_page_as_markdown".to_string(),
-                reason: extraction_result
+            log::debug!(
+                "Readability extraction failed, falling back to full document HTML: {}",
+                extraction_result
                     .error
-                    .unwrap_or_else(|| "Readability extraction failed".to_string()),
-            });
+                    .as_deref()
+                    .unwrap_or("Readability extraction failed")
+            );
+            extraction_result = extract_full_document(context)?;
         }
 
         // Convert the extracted HTML content to Markdown
         let full_markdown = convert_html_to_markdown(&extraction_result.content);
 
-        // Calculate pagination information
-        let total_pages = if full_markdown.is_empty() {
-            1
-        } else {
-            (full_markdown.len() + params.page_size - 1) / params.page_size
-        };
-
-        // Clamp page number to valid range
-        let current_page = params.page.clamp(1, total_pages.max(1));
-
-        // Calculate start and end indices for the requested page
-        let start_idx = (current_page - 1) * params.page_size;
-        let end_idx = (start_idx + params.page_size).min(full_markdown.len());
-
-        // Extract the content for the current page
-        let mut page_content = if start_idx < full_markdown.len() {
-            full_markdown[start_idx..end_idx].to_string()
-        } else {
-            String::new()
-        };
-
-        // Add title to the first page only
-        if current_page == 1 && !extraction_result.title.is_empty() {
-            page_content = format!("# {}\n\n{}", extraction_result.title, page_content);
-        }
-
-        // Add pagination information if there are multiple pages
-        if total_pages > 1 {
-            let pagination_info = if current_page < total_pages {
-                format!(
-                    "\n\n---\n\n*Page {} of {}. There are {} more page(s) with additional content.*\n",
-                    current_page,
-                    total_pages,
-                    total_pages - current_page
-                )
-            } else {
-                format!(
-                    "\n\n---\n\n*Page {} of {}. This is the last page.*\n",
-                    current_page, total_pages
-                )
-            };
-            page_content.push_str(&pagination_info);
-        }
-
-        // Return the result with pagination metadata
-        Ok(ToolResult::success_with(serde_json::json!({
-            "markdown": page_content,
-            "title": extraction_result.title,
-            "url": extraction_result.url,
-            "currentPage": current_page,
-            "totalPages": total_pages,
-            "hasMorePages": current_page < total_pages,
-            "length": page_content.len(),
-            "byline": extraction_result.byline,
-            "excerpt": extraction_result.excerpt,
-            "siteName": extraction_result.site_name,
-        })))
+        Ok(markdown_tool_result(
+            &full_markdown,
+            &extraction_result.title,
+            &extraction_result.url,
+            &extraction_result.byline,
+            &extraction_result.excerpt,
+            &extraction_result.site_name,
+            &params,
+        ))
     }
+}
+
+fn markdown_tool_result(
+    full_markdown: &str,
+    title: &str,
+    url: &str,
+    byline: &str,
+    excerpt: &str,
+    site_name: &str,
+    params: &GetPageAsMarkdownParams,
+) -> ToolResult {
+    let total_pages = if full_markdown.is_empty() {
+        1
+    } else {
+        (full_markdown.len() + params.page_size - 1) / params.page_size
+    };
+
+    let current_page = params.page.clamp(1, total_pages.max(1));
+    let start_idx = (current_page - 1) * params.page_size;
+    let end_idx = (start_idx + params.page_size).min(full_markdown.len());
+
+    let mut page_content = if start_idx < full_markdown.len() {
+        full_markdown[start_idx..end_idx].to_string()
+    } else {
+        String::new()
+    };
+
+    if current_page == 1 && !title.is_empty() && !page_content.starts_with("# ") {
+        page_content = format!("# {}\n\n{}", title, page_content);
+    }
+
+    if total_pages > 1 {
+        let pagination_info = if current_page < total_pages {
+            format!(
+                "\n\n---\n\n*Page {} of {}. There are {} more page(s) with additional content.*\n",
+                current_page,
+                total_pages,
+                total_pages - current_page
+            )
+        } else {
+            format!(
+                "\n\n---\n\n*Page {} of {}. This is the last page.*\n",
+                current_page, total_pages
+            )
+        };
+        page_content.push_str(&pagination_info);
+    }
+
+    ToolResult::success_with(serde_json::json!({
+        "markdown": page_content,
+        "title": title,
+        "url": url,
+        "currentPage": current_page,
+        "totalPages": total_pages,
+        "hasMorePages": current_page < total_pages,
+        "length": page_content.len(),
+        "byline": byline,
+        "excerpt": excerpt,
+        "siteName": site_name,
+    }))
+}
+
+fn get_page_string(context: &mut ToolContext, expression: &str) -> Result<String> {
+    let result = context
+        .session
+        .tab()?
+        .evaluate(expression, false)
+        .map_err(|e| BrowserError::EvaluationFailed(e.to_string()))?;
+
+    Ok(result
+        .value
+        .and_then(|value| value.as_str().map(ToOwned::to_owned))
+        .unwrap_or_default())
+}
+
+fn parse_extraction_result(
+    result_value: Option<serde_json::Value>,
+    description: Option<String>,
+    remote_type: headless_chrome::protocol::cdp::Runtime::RemoteObjectType,
+) -> Result<ExtractionResult> {
+    let result_value = result_value.ok_or_else(|| {
+        let description = description
+            .map(|d| format!("Description: {}", d))
+            .unwrap_or_else(|| format!("Type: {:?}", remote_type));
+
+        BrowserError::ToolExecutionFailed {
+            tool: "get_page_as_markdown".to_string(),
+            reason: format!("No value returned from JavaScript. {}", description),
+        }
+    })?;
+
+    if let Some(json_str) = result_value.as_str() {
+        serde_json::from_str(json_str).map_err(|e| BrowserError::ToolExecutionFailed {
+            tool: "get_page_as_markdown".to_string(),
+            reason: format!("Failed to parse extraction result: {}", e),
+        })
+    } else {
+        serde_json::from_value(result_value).map_err(|e| BrowserError::ToolExecutionFailed {
+            tool: "get_page_as_markdown".to_string(),
+            reason: format!("Failed to deserialize extraction result: {}", e),
+        })
+    }
+}
+
+fn extract_full_document(context: &mut ToolContext) -> Result<ExtractionResult> {
+    let result = context
+        .session
+        .tab()?
+        .evaluate(
+            r#"(function() {
+                function textLength(element) {
+                    return (element && (element.innerText || element.textContent) || '').trim().length;
+                }
+
+                function cloneClean(element) {
+                    const clone = element.cloneNode(true);
+                    clone.querySelectorAll('script,noscript,style,link,svg,iframe,canvas').forEach(function(el) {
+                        el.remove();
+                    });
+                    clone.querySelectorAll('img').forEach(function(img) {
+                        if (!img.getAttribute('alt')) {
+                            img.remove();
+                        }
+                    });
+                    return clone;
+                }
+
+                const preferredSelectors = [
+                    'article',
+                    'main',
+                    '[role="main"]',
+                    '#main',
+                    '#content',
+                    '#contents',
+                    '#article',
+                    '#post',
+                    '#story',
+                    '.content',
+                    '.article',
+                    '.post',
+                    '.entry',
+                    '#bigbox'
+                ];
+
+                let selected = null;
+                for (const selector of preferredSelectors) {
+                    const candidates = Array.from(document.querySelectorAll(selector))
+                        .filter(function(el) { return textLength(el) > 100; });
+                    if (candidates.length > 0) {
+                        candidates.sort(function(a, b) { return textLength(b) - textLength(a); });
+                        selected = candidates[0];
+                        break;
+                    }
+                }
+
+                if (!selected && document.body) {
+                    const candidates = Array.from(document.body.querySelectorAll('section,div,table,td'))
+                        .filter(function(el) {
+                            const tag = el.tagName.toLowerCase();
+                            if (['header', 'footer', 'nav', 'form'].includes(tag)) {
+                                return false;
+                            }
+                            return textLength(el) > 200;
+                        });
+                    candidates.sort(function(a, b) {
+                        const aText = textLength(a);
+                        const bText = textLength(b);
+                        const aPenalty = a.querySelectorAll('form,input,button').length * 500;
+                        const bPenalty = b.querySelectorAll('form,input,button').length * 500;
+                        return (bText - bPenalty) - (aText - aPenalty);
+                    });
+                    selected = candidates[0] || document.body;
+                }
+
+                const cleaned = selected ? cloneClean(selected) : null;
+                const content = cleaned ? cleaned.outerHTML : '';
+                const textContent = selected ? (selected.innerText || selected.textContent || '') : '';
+                return JSON.stringify({
+                    title: document.title || '',
+                    content: content,
+                    textContent: textContent,
+                    url: window.location.href || '',
+                    readabilityFailed: false
+                });
+            })()"#,
+            false,
+        )
+        .map_err(|e| BrowserError::EvaluationFailed(e.to_string()))?;
+
+    parse_extraction_result(result.value, result.description, result.Type)
 }
 
 /// Structure for extraction result returned from JavaScript

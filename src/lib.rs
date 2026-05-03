@@ -5,7 +5,7 @@
 //! ## Features
 //!
 //! - **MCP Server**: Model Context Protocol server for AI-driven browser automation
-//! - **Browser Session Management**: Launch or connect to Chrome/Chromium instances
+//! - **Browser Session Management**: Launch or connect to CDP-compatible browser instances
 //! - **Tool System**: High-level browser operations (navigate, click, input, extract, screenshot, etc.)
 //! - **DOM Extraction**: Extract page structure with indexed interactive elements for AI-friendly targeting
 //!
@@ -22,6 +22,9 @@
 //!
 //! # Run with visible browser (useful for debugging)
 //! cargo run --bin mcp-server -- --headed
+//!
+//! # Run with LightPanda
+//! cargo run --bin mcp-server -- --browser lightpanda
 //! ```
 //!
 //! ## Library Usage (Advanced)

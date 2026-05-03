@@ -1,12 +1,26 @@
 use std::path::PathBuf;
 
+/// Browser implementation to launch for CDP automation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BrowserEngine {
+    /// Prefer Chrome/Chromium, falling back to LightPanda if Chrome is not installed.
+    Auto,
+    /// Require Chrome/Chromium to be installed.
+    Chrome,
+    /// Require LightPanda to be installed.
+    Lightpanda,
+}
+
 /// Options for launching a new browser instance
 #[derive(Debug, Clone)]
 pub struct LaunchOptions {
     /// Whether to run browser in headless mode (default: true)
     pub headless: bool,
 
-    /// Custom Chrome/Chromium binary path
+    /// Browser implementation to launch (default: Auto)
+    pub browser_engine: BrowserEngine,
+
+    /// Custom browser binary path
     pub chrome_path: Option<PathBuf>,
 
     /// Browser window width (default: 1280)
@@ -29,6 +43,7 @@ impl Default for LaunchOptions {
     fn default() -> Self {
         Self {
             headless: true,
+            browser_engine: BrowserEngine::Auto,
             chrome_path: None,
             window_width: 1280,
             window_height: 720,
@@ -54,6 +69,12 @@ impl LaunchOptions {
     /// Builder method: set Chrome binary path
     pub fn chrome_path(mut self, path: PathBuf) -> Self {
         self.chrome_path = Some(path);
+        self
+    }
+
+    /// Builder method: set browser implementation
+    pub fn browser_engine(mut self, browser_engine: BrowserEngine) -> Self {
+        self.browser_engine = browser_engine;
         self
     }
 
@@ -117,6 +138,7 @@ mod tests {
     fn test_launch_options_default() {
         let opts = LaunchOptions::default();
         assert!(opts.headless);
+        assert_eq!(opts.browser_engine, BrowserEngine::Auto);
         assert_eq!(opts.window_width, 1280);
         assert_eq!(opts.window_height, 720);
         assert!(opts.sandbox);
@@ -127,11 +149,13 @@ mod tests {
     fn test_launch_options_builder() {
         let opts = LaunchOptions::new()
             .headless(false)
+            .browser_engine(BrowserEngine::Chrome)
             .window_size(1920, 1080)
             .sandbox(false)
             .launch_timeout(60000);
 
         assert!(!opts.headless);
+        assert_eq!(opts.browser_engine, BrowserEngine::Chrome);
         assert_eq!(opts.window_width, 1920);
         assert_eq!(opts.window_height, 1080);
         assert!(!opts.sandbox);
