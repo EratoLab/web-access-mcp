@@ -73,6 +73,10 @@ struct Cli {
     #[arg(long, value_name = "DIR")]
     user_data_dir: Option<String>,
 
+    /// Enable the retrieve_file tool for direct HTTP(S) downloads.
+    #[arg(long)]
+    enable_retrieve_file: bool,
+
     /// Transport type to use
     #[arg(long, short = 't', value_enum, default_value = "stdio")]
     transport: Transport,
@@ -158,14 +162,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     BrowserSession::validate_browser_binary(&options)
         .map_err(|e| format!("Browser binary validation failed: {e}"))?;
 
+    let service = BrowserServer::with_options(options)
+        .map_err(|e| format!("Failed to create browser server: {e}"))?;
+    let service = if cli.enable_retrieve_file {
+        service.with_file_retrieval()
+    } else {
+        service
+    };
+
     // Route to appropriate transport
     match cli.transport {
         Transport::Stdio => {
             info!("Transport: stdio");
             info!("Ready to accept MCP connections via stdio");
             let (_read, _write) = (stdin(), stdout());
-            let service = BrowserServer::with_options(options.clone())
-                .map_err(|e| format!("Failed to create browser server: {}", e))?;
             let server = service.serve(stdio()).await?;
 
             // Set up signal handler for graceful shutdown
@@ -240,10 +250,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let bind_addr = format!("{}:{}", cli.host, cli.port);
 
             // Create service factory closure
-            let service_factory = move || {
-                BrowserServer::with_options(options.clone())
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
-            };
+            let service_factory = move || Ok(service.clone());
 
             let mut session_manager = LocalSessionManager::default();
             let mut session_config = SessionConfig::default();

@@ -22,7 +22,6 @@ fn browser_session_lock() -> &'static Mutex<()> {
 #[derive(Clone)]
 pub struct BrowserServer {
     launch_options: crate::browser::LaunchOptions,
-    #[allow(dead_code)]
     tool_router: ToolRouter<Self>,
 }
 
@@ -38,6 +37,12 @@ impl BrowserServer {
             launch_options: options,
             tool_router: Self::tool_router(),
         })
+    }
+
+    /// Enable the `retrieve_file` MCP tool for this server.
+    pub fn with_file_retrieval(mut self) -> Self {
+        self.tool_router.merge(Self::file_retrieval_router());
+        self
     }
 
     /// Execute a closure with a lazily initialized browser session.
@@ -71,12 +76,41 @@ impl Drop for BrowserServer {
     }
 }
 
-#[tool_handler]
+#[tool_handler(router = self.tool_router)]
 impl ServerHandler for BrowserServer {
     fn get_info(&self) -> ServerInfo {
         let mut info = ServerInfo::default();
         info.instructions = Some("Browser-use MCP Server".into());
         info.capabilities = ServerCapabilities::builder().enable_tools().build();
         info
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn advertises_the_erato_file_schema_only_when_enabled() {
+        let server = BrowserServer::default();
+        assert!(server.get_tool("retrieve_file").is_none());
+
+        let server = server.with_file_retrieval();
+        assert!(server.get_tool("browser_get_page_as_markdown").is_some());
+        let tool = server.get_tool("retrieve_file").unwrap();
+        let schema = tool.output_schema.as_ref().unwrap();
+        assert_eq!(
+            schema["properties"]["data_base64"]["contentEncoding"],
+            "base64"
+        );
+        assert_eq!(
+            schema["properties"]["data_base64"]["chat.erato/file_content_field"],
+            true
+        );
+        assert_eq!(
+            schema["properties"]["name"]["chat.erato/file_name_field"],
+            true
+        );
+        assert_eq!(schema["properties"]["mime_type"]["type"], "string");
     }
 }
