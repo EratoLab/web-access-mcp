@@ -3,6 +3,7 @@
 //! This module provides rmcp-compatible tools by wrapping the existing tool implementations.
 
 pub mod handler;
+mod retrieve_file;
 pub use handler::BrowserServer;
 
 use crate::tools::{self, Tool, ToolContext, ToolResult as InternalToolResult};
